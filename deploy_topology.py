@@ -11,6 +11,7 @@ from time import sleep
 from re import sub
 from requests import get, post, delete
 from yaml import safe_dump, load
+import yaml
 
 def create_project(name):
     """
@@ -61,16 +62,22 @@ def assign_appliance_id():
     """
 
     node_seq = 0
-    url = "http://%s:%s/v2/appliances" % (CONFIG["gns3_server"], CONFIG["gns3_port"])
+    url = "http://%s:%s/v2/templates" % (CONFIG["gns3_server"], CONFIG["gns3_port"])
     response = get(url)
 
     if response.status_code == 200:
         body = response.json()
         for node in CONFIG["nodes"]:
             node_dict = next((item for item in body if item["name"] == node["appliance_name"]), None)
-            node_appliance_id = node_dict["appliance_id"]
-            CONFIG["nodes"][node_seq]["appliance_id"] = node_appliance_id
-            node_seq += 1
+            if node_dict is not None:    
+                node_appliance_id = node_dict["template_id"]
+                CONFIG["nodes"][node_seq]["template_id"] = node_appliance_id
+                node_seq += 1
+            else:
+            # Handle the case where the appliance name is not found
+                print(f"Appliance name {node['appliance_name']} not found in the response.")
+                node_seq += 1
+
     else:
         print("Received HTTP error %d when retrieving appliances! Exiting." % response.status_code)
         exit(1)
@@ -87,13 +94,16 @@ def add_nodes():
         instance_seq = 1
         for instance in appliance["instances"]:
             ### Adding node name to the config
-            instance["name"] = appliance["appliance_name"].replace(" ", "") + \
+            if appliance["appliance_name"] == 'Ethernet switch':
+                instance['name'] = 'Switch'+ str(instance_seq)
+            else:
+                instance["name"] = appliance["appliance_name"].replace(" ", "") + \
                                "-"  + str(instance_seq)
 
             ### Creating the node
-            url = "http://%s:%s/v2/projects/%s/appliances/%s" % \
+            url = "http://%s:%s/v2/projects/%s/templates/%s" % \
                    (CONFIG["gns3_server"], CONFIG["gns3_port"], \
-                   CONFIG["project_id"], appliance["appliance_id"])
+                   CONFIG["project_id"], appliance["template_id"])
             data = {"compute_id": "local", "x": instance["x"], "y": instance["y"]}
             data_json = dumps(data)
             response = post(url, data=data_json)
@@ -106,9 +116,9 @@ def add_nodes():
 
     ### Retrieving all nodes in the project, the assigning node IDs and console port numbers
     ### by searching the node's name, then appending the config with them.
-    url = "http://%s:%s/v2/projects/%s/nodes" % \
+    urlnodes = "http://%s:%s/v2/projects/%s/nodes" % \
            (CONFIG["gns3_server"], CONFIG["gns3_port"], CONFIG["project_id"])
-    response = get(url)
+    response = get(urlnodes)
 
     if response.status_code == 200:
         body = response.json()
@@ -221,8 +231,8 @@ def build_ansible_hosts():
 if __name__ == "__main__":
 
     ### Loading config file
-    with open("topology_config.yml") as config_file:
-        CONFIG = load(config_file)
+    with open("topology_config.yml",'r') as config_file:
+        CONFIG = load(config_file, Loader=yaml.FullLoader)
 
     ### Create project and add its ID to the config
     print("Creating GNS3 project")
